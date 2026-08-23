@@ -56,10 +56,10 @@ router.post('/transaction/offline', async (req, res) => {
         if (!sender) throw new Error("Sender not found in database");
         if (!receiver) throw new Error("Receiver VPA not found");
 
-        // 1.5 Verify Transaction Deadline (48 Hours Maximum)
-        const FORTY_EIGHT_HOURS = 48 * 60 * 60 * 1000;
-        if (Date.now() - payload.timestamp > FORTY_EIGHT_HOURS) {
-            throw new Error("Transaction Expired: Offline packets must be synced within 48 hours.");
+        // 1.5 Verify Transaction Deadline (24 Hours Maximum)
+        const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+        if (Date.now() - payload.timestamp > TWENTY_FOUR_HOURS) {
+            throw new Error("Transaction Expired: Offline packets must be synced within 24 hours.");
         }
 
         // 2. Verify Cryptographic Signature! (This proves they have the Private Key offline)
