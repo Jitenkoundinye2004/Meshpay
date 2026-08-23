@@ -6,6 +6,7 @@ import { Scanner } from './components/Scanner';
 import { SendMoney } from './components/SendMoney';
 import { signTransaction } from './lib/crypto';
 import { useData } from './hooks/useData';
+import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CreditCard, Send, ArrowDownLeft, Activity, Wifi, WifiOff, Smartphone, QrCode, LogOut, Copy, Check, X, CheckCircle2, AlertCircle, Info, Lock, ArrowRight } from 'lucide-react';
 
@@ -28,6 +29,7 @@ function App() {
     const saved = localStorage.getItem('meshpay_offline_queue');
     return saved ? JSON.parse(saved) : [];
   });
+  const [handoffPacket, setHandoffPacket] = useState<any>(null);
 
   const { accounts, transactions } = useData(token);
 
@@ -62,9 +64,22 @@ function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Version 2: Listen for scanned offline packets from Scanner
+    const handleReceivePacket = (e: any) => {
+      const packet = e.detail;
+      setOfflineQueue(prev => {
+        const newQ = [...prev, packet];
+        localStorage.setItem('meshpay_offline_queue', JSON.stringify(newQ));
+        return newQ;
+      });
+      showToast(`📥 Cryptographic Proof received! Saved ₹${packet.payload.amount} to your offline queue.`, "success");
+    };
+    window.addEventListener('meshpay_receive_packet', handleReceivePacket);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('meshpay_receive_packet', handleReceivePacket);
     };
   }, []);
 
@@ -379,13 +394,8 @@ function App() {
 
       // PHASE 4: PWA Offline Queue Logic
       if (!isOnline) {
-        // Save to offline queue
-        const newQueue = [...offlineQueue, packet];
-        setOfflineQueue(newQueue);
-        localStorage.setItem('meshpay_offline_queue', JSON.stringify(newQueue));
-        
-        showToast("📴 OFFLINE MODE: Transaction cryptographically signed and saved. It will sync automatically when you reconnect to the internet.", "info");
-        setActiveTab('home');
+        // Version 2: Cryptographic QR Handoff instead of immediate local queueing!
+        setHandoffPacket(packet);
         return;
       }
 
@@ -702,6 +712,54 @@ function App() {
            </motion.div>
          )}
        </AnimatePresence>
+      
+      {/* VERSION 2: Cryptographic QR Handoff Modal */}
+      {handoffPacket && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-card w-full max-w-sm rounded-3xl p-8 flex flex-col items-center shadow-2xl">
+            <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle2 size={32} className="text-emerald-500" />
+            </div>
+            <h3 className="text-2xl font-black mb-2 tracking-tight">Offline Payment Ready</h3>
+            <p className="text-sm text-muted-foreground text-center mb-8 font-medium">Have the receiver scan this QR code with their MeshPay app to instantly transfer the cryptographic proof.</p>
+            
+            <div className="bg-white p-5 rounded-2xl shadow-[0_0_40px_rgba(16,185,129,0.2)] mb-8 transition-transform hover:scale-105">
+              <QRCodeSVG 
+                value={JSON.stringify(handoffPacket)} 
+                size={220}
+                level="L"
+              />
+            </div>
+            
+            <div className="flex gap-2 w-full mb-3">
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(handoffPacket));
+                  showToast("Copied to clipboard! You can now SMS or WhatsApp this code to the receiver.", "success");
+                }}
+                className="flex-1 bg-primary text-primary-foreground font-bold py-3 px-4 rounded-xl hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 text-sm"
+              >
+                <Copy size={16} /> SMS Code Instead
+              </button>
+            </div>
+
+            <button 
+              onClick={() => {
+                // Fallback: If receiver is not nearby and SMS is not possible, queue locally
+                const newQueue = [...offlineQueue, handoffPacket];
+                setOfflineQueue(newQueue);
+                localStorage.setItem('meshpay_offline_queue', JSON.stringify(newQueue));
+                setHandoffPacket(null);
+                setActiveTab('home');
+                showToast("Fallback: Saved to your local queue to sync later.", "info");
+              }}
+              className="w-full bg-secondary text-secondary-foreground font-bold py-3 rounded-xl hover:bg-secondary/80 transition-colors text-sm"
+            >
+              Done / Queue Locally
+            </button>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

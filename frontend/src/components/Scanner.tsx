@@ -21,6 +21,29 @@ export function Scanner({ currentUser, onSendOffline, defaultMode = 'receive' }:
 
   const handleScan = (text: string) => {
     if (text) {
+      // Check if it's a JSON packet (QR Handoff)
+      try {
+        const packet = JSON.parse(text);
+        if (packet && packet.payload && packet.signature) {
+          if (packet.payload.receiverVpa !== currentUser.vpa) {
+            alert(`This offline payment is for ${packet.payload.receiverVpa}, not you!`);
+            setIsCameraActive(false);
+            return;
+          }
+          // It's for me! We need to pass it back up to App.tsx
+          if (window.confirm(`Accept offline payment of ₹${packet.payload.amount} from ${packet.payload.senderVpa}?`)) {
+             // In a real app we'd pass this via a new prop `onReceivePacket`, 
+             // but we can cheat by using a global custom event since we are fast-prototyping!
+             window.dispatchEvent(new CustomEvent('meshpay_receive_packet', { detail: packet }));
+             setIsCameraActive(false);
+             setMode('receive');
+          }
+          return;
+        }
+      } catch(e) {
+        // Not JSON, it's just a normal VPA string, continue to pay_form
+      }
+
       setScannedVpa(text);
       setIsCameraActive(false);
       setMode('pay_form');
@@ -135,9 +158,23 @@ export function Scanner({ currentUser, onSendOffline, defaultMode = 'receive' }:
                   </div>
                 )}
               </div>
-              <p className="text-muted-foreground mt-8 text-center max-w-xs">
+              <p className="text-muted-foreground mt-8 text-center max-w-xs mb-4">
                 Point your camera at a MeshPay QR code to capture their UPI ID securely.
               </p>
+              
+              <button 
+                onClick={async () => {
+                  try {
+                    const text = await navigator.clipboard.readText();
+                    if(text) handleScan(text);
+                  } catch(e) {
+                    alert("Could not read clipboard. Please paste the code manually.");
+                  }
+                }}
+                className="text-sm font-bold text-primary underline underline-offset-4 hover:text-primary/80 transition-colors"
+              >
+                Or Paste Offline Code from SMS
+              </button>
             </motion.div>
           )}
 
