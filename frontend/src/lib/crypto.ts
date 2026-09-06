@@ -7,37 +7,49 @@ export async function generateKeyPair() {
       name: "ECDSA",
       namedCurve: "P-256",
     },
-    true, // extractable
+    true,
     ["sign", "verify"]
   );
   return keyPair;
 }
 
-// 2. Export Public Key to Base64 (To send to MongoDB)
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+// 2. Export Public Key to Base64
 export async function exportPublicKey(key: CryptoKey): Promise<string> {
   const exported = await window.crypto.subtle.exportKey("spki", key);
-  const exportedAsString = String.fromCharCode.apply(null, Array.from(new Uint8Array(exported)));
-  return btoa(exportedAsString);
+  return arrayBufferToBase64(exported);
 }
 
-// 3. Export Private Key to Base64 (To store safely in localStorage/IndexedDB)
+// 3. Export Private Key to Base64
 export async function exportPrivateKey(key: CryptoKey): Promise<string> {
   const exported = await window.crypto.subtle.exportKey("pkcs8", key);
-  const exportedAsString = String.fromCharCode.apply(null, Array.from(new Uint8Array(exported)));
-  return btoa(exportedAsString);
+  return arrayBufferToBase64(exported);
 }
 
-// 4. Import Private Key from Base64 (When user loads the app)
+// 4. Import Private Key from Base64
 export async function importPrivateKey(pem: string): Promise<CryptoKey> {
-  const binaryDerString = atob(pem);
-  const binaryDer = new Uint8Array(binaryDerString.length);
-  for (let i = 0; i < binaryDerString.length; i++) {
-    binaryDer[i] = binaryDerString.charCodeAt(i);
-  }
-
+  const buffer = base64ToArrayBuffer(pem);
   return await window.crypto.subtle.importKey(
     "pkcs8",
-    binaryDer.buffer,
+    buffer,
     {
       name: "ECDSA",
       namedCurve: "P-256",
@@ -51,11 +63,9 @@ export async function importPrivateKey(pem: string): Promise<CryptoKey> {
 export async function signTransaction(privateKeyPem: string, payload: any): Promise<string> {
   const privateKey = await importPrivateKey(privateKeyPem);
   
-  // Convert our JSON payload into an array of bytes
   const encoder = new TextEncoder();
   const dataToSign = encoder.encode(JSON.stringify(payload));
 
-  // Mathematically sign the bytes
   const signatureBuffer = await window.crypto.subtle.sign(
     {
       name: "ECDSA",
@@ -65,8 +75,5 @@ export async function signTransaction(privateKeyPem: string, payload: any): Prom
     dataToSign
   );
 
-  // Convert the binary signature to a Base64 string so we can send it over the mesh
-  const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-  const signatureString = String.fromCharCode.apply(null, signatureArray);
-  return btoa(signatureString);
+  return arrayBufferToBase64(signatureBuffer);
 }

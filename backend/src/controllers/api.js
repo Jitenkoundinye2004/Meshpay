@@ -1,21 +1,26 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 
 const serverKeyHolder = require('../crypto/ServerKeyHolder');
 const demo = require('../services/DemoService');
 const mesh = require('../services/MeshSimulatorService');
 const bridge = require('../services/BridgeIngestionService');
 const idempotency = require('../services/IdempotencyService');
+const aiService = require('../services/ai/AIService');
 
-// Mongoose Models
-const mongoose = require('mongoose');
-const crypto = require('crypto');
+// Sequelize Models
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
+const sequelize = require('../config/database');
 
-// Controllers
+// Controllers & Middleware
 const { sendRegisterOtp, registerUser, loginUser, getMe, forgotPassword, resetPassword, forgotPin, resetPin } = require('./authController');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const aiRoutes = require('./aiRoutes');
+
+// Mount AI Routes
+router.use('/ai', aiRoutes);
 
 // ------------------------------------------------------------------ Auth
 router.post('/auth/send-register-otp', sendRegisterOtp);
@@ -29,50 +34,41 @@ router.post('/auth/reset-pin', resetPin);
 
 // ------------------------------------------------------------------ Offline Crypto Engine
 router.post('/transaction/offline', async (req, res) => {
-    // Start a MongoDB ACID Transaction Session
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
+    const t = await sequelize.transaction();
     try {
-        const { payload, signature, pin } = req.body;
-        const { senderVpa, receiverVpa, amount, nonce } = payload;
+        const { payload, signature } = req.body;
+        const { senderVpa, receiverVpa, amount, nonce, timestamp } = payload;
 
-        if (amount <= 0 || amount > 50000) throw new Error("Transaction amount must be between ₹1 and ₹50,000.");
+        if (amount <= 0 || amount > 50000) {
+            throw new Error("Transaction amount must be between ₹1 and ₹50,000.");
+        }
 
         // --- IDEMPOTENCY CHECK ---
-        // If this nonce (packetId) has already been processed (e.g. background sync retries),
-        // we safely ignore it and return success to the client without deducting funds twice.
-        const existingTx = await Transaction.findOne({ packetId: nonce }).session(session);
+        const existingTx = await Transaction.findOne({ where: { packetId: nonce }, transaction: t });
         if (existingTx) {
-            await session.abortTransaction();
-            session.endSession();
+            await t.rollback();
             return res.json({ message: "Transaction already processed successfully (Idempotency)", transaction: existingTx });
         }
 
         // 1. Find Sender and Receiver
-        const sender = await User.findOne({ vpa: senderVpa }).session(session);
-        const receiver = await User.findOne({ vpa: receiverVpa }).session(session);
+        const sender = await User.findOne({ where: { vpa: senderVpa.toLowerCase() }, transaction: t });
+        const receiver = await User.findOne({ where: { vpa: receiverVpa.toLowerCase() }, transaction: t });
 
         if (!sender) throw new Error("Sender not found in database");
         if (!receiver) throw new Error("Receiver VPA not found");
 
         // 1.5 Verify Transaction Deadline (24 Hours Maximum)
         const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-        if (Date.now() - payload.timestamp > TWENTY_FOUR_HOURS) {
+        if (Date.now() - timestamp > TWENTY_FOUR_HOURS) {
             throw new Error("Transaction Expired: Offline packets must be synced within 24 hours.");
         }
 
-        // 2. Verify Cryptographic Signature! (This proves they have the Private Key offline)
-        // Convert the raw base64 SPKI key back into a format Node crypto can use
+        // 2. Verify Cryptographic Signature
         const publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${sender.publicKey}\n-----END PUBLIC KEY-----`;
-        
         const verify = crypto.createVerify('SHA256');
-        // Warning: JSON.stringify order matters. We assume the Express JSON parser preserves the order it received.
         verify.update(JSON.stringify(payload));
         verify.end();
 
-        // Web Crypto API uses raw P1363 signatures (r+s). Node.js defaults to DER. 
-        // We must explicitly tell Node.js to use ieee-p1363.
         const isValid = verify.verify({
             key: publicKeyPem,
             dsaEncoding: 'ieee-p1363'
@@ -87,33 +83,48 @@ router.post('/transaction/offline', async (req, res) => {
             throw new Error("Insufficient Funds");
         }
 
-        // 4. Record the Transaction with the Nonce as Packet ID to prevent Replay Attacks
-        const tx = await Transaction.create([{
+        // 4. Run AI Risk Analysis (Non-blocking fallback guarantee)
+        let aiRisk = { riskLevel: 'LOW', riskScore: 10 };
+        try {
+            aiRisk = await aiService.analyzeTransaction({
+                packetId: nonce,
+                amount,
+                senderVpa,
+                receiverVpa,
+                status: 'SETTLED',
+                hopCount: 1
+            });
+        } catch (e) {
+            console.warn(`AI Analysis skipped: ${e.message}`);
+        }
+
+        // 5. Create Transaction Record
+        const tx = await Transaction.create({
             packetId: nonce,
-            senderVpa,
-            receiverVpa,
+            senderVpa: sender.vpa,
+            receiverVpa: receiver.vpa,
             amount,
             status: 'SETTLED',
-            bridgeNodeId: 'Direct-Upload'
-        }], { session });
+            bridgeNodeId: 'Direct-Upload',
+            signedAt: new Date(timestamp),
+            settledAt: new Date(),
+            riskLevel: aiRisk.riskLevel || 'LOW',
+            riskScore: aiRisk.riskScore || 10
+        }, { transaction: t });
 
-        // 5. Safely move the money using MongoDB ACID
-        sender.balance -= amount;
-        receiver.balance += amount;
+        // 6. Balance Transfer
+        sender.balance -= Number(amount);
+        receiver.balance += Number(amount);
 
-        await sender.save({ session });
-        await receiver.save({ session });
+        await sender.save({ transaction: t });
+        await receiver.save({ transaction: t });
 
-        // Commit the transaction
-        await session.commitTransaction();
-        session.endSession();
+        await t.commit();
 
-        res.json({ message: "Cryptographic Offline Signature Verified & Funds Settled!", transaction: tx[0] });
+        res.json({ message: "Cryptographic Offline Signature Verified & Funds Settled!", transaction: tx });
 
     } catch (e) {
-        // Rollback the transaction if anything fails (hacking attempt, insufficient funds, etc)
-        await session.abortTransaction();
-        session.endSession();
+        await t.rollback();
         res.status(400).json({ error: e.message });
     }
 });
@@ -125,7 +136,7 @@ router.post('/account/add-money', async (req, res) => {
         if (!vpa || !amount) return res.status(400).json({ error: "Missing data" });
         if (amount <= 0 || amount > 100000) return res.status(400).json({ error: "Amount must be between ₹1 and ₹1,00,000 per transaction." });
 
-        const user = await User.findOne({ vpa });
+        const user = await User.findOne({ where: { vpa: vpa.toLowerCase() } });
         if (!user) return res.status(404).json({ error: "User not found" });
 
         user.balance += Number(amount);
@@ -137,7 +148,7 @@ router.post('/account/add-money', async (req, res) => {
     }
 });
 
-// ------------------------------------------------------------------ key
+// ------------------------------------------------------------------ Server Public Key
 router.get('/server-key', (req, res) => {
     res.json({
         publicKey: serverKeyHolder.getPublicKeyBase64(),
@@ -146,7 +157,7 @@ router.get('/server-key', (req, res) => {
     });
 });
 
-// ---------------------------------------------------------------- demo
+// ---------------------------------------------------------------- Demo Mesh Forwarding
 router.post('/demo/send', async (req, res) => {
     try {
         const reqBody = req.body;
@@ -158,7 +169,9 @@ router.post('/demo/send', async (req, res) => {
             reqBody.ttl == null ? 5 : reqBody.ttl
         );
 
-        const startDevice = reqBody.startDevice == null ? "phone-jiten" : reqBody.startDevice;
+        const devices = mesh.getDevices();
+        const fallbackDevice = devices.length > 0 ? devices[0].deviceId : "node-client";
+        const startDevice = reqBody.startDevice || (reqBody.senderVpa ? `node-${reqBody.senderVpa.split('@')[0]}` : fallbackDevice);
         mesh.inject(startDevice, packet);
 
         res.json({
@@ -172,7 +185,7 @@ router.post('/demo/send', async (req, res) => {
     }
 });
 
-// -------------------------------------------------------------- mesh sim
+// -------------------------------------------------------------- Mesh Simulator Endpoints
 router.get('/mesh/state', (req, res) => {
     const deviceData = [];
     for (const d of mesh.getDevices()) {
@@ -201,7 +214,6 @@ router.post('/mesh/flush', async (req, res) => {
     const uploads = mesh.collectBridgeUploads();
     const results = [];
     
-    // Process them all simultaneously (Promise.all)
     await Promise.all(uploads.map(async (up) => {
         const r = await bridge.ingest(up.packet, up.bridgeNodeId, 5 - up.packet.ttl);
         results.push({
@@ -225,7 +237,7 @@ router.post('/mesh/reset', (req, res) => {
     res.json({ status: "mesh and idempotency cache cleared" });
 });
 
-// -------------------------------------------------------------- bridge
+// -------------------------------------------------------------- Bridge Node Ingestion
 router.post('/bridge/ingest', async (req, res) => {
     const packet = req.body;
     const bridgeNodeId = req.header('X-Bridge-Node-Id') || 'unknown';
@@ -235,12 +247,12 @@ router.post('/bridge/ingest', async (req, res) => {
     res.json(r);
 });
 
-// ------------------------------------------------------------- accounts / transactions
-// Note: We use User.find() instead of Account.findAll() for Mongoose
+// ------------------------------------------------------------- Accounts & Transaction Ledger
 router.get('/accounts', authMiddleware, async (req, res) => {
     try {
-        // Exclude password and pin hashes from public API response
-        const users = await User.find().select('-passwordHash -pinHash');
+        const users = await User.findAll({
+            attributes: { exclude: ['passwordHash', 'pinHash'] }
+        });
         res.json(users);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -249,15 +261,17 @@ router.get('/accounts', authMiddleware, async (req, res) => {
 
 router.get('/transactions', authMiddleware, async (req, res) => {
     try {
-        // Only return transactions where the logged in user is either sender or receiver!
-        const transactions = await Transaction.find({
-            $or: [
-                { senderVpa: req.user.vpa },
-                { receiverVpa: req.user.vpa }
-            ]
-        })
-            .sort({ createdAt: -1 })
-            .limit(20);
+        const { Op } = require('sequelize');
+        const transactions = await Transaction.findAll({
+            where: {
+                [Op.or]: [
+                    { senderVpa: req.user.vpa },
+                    { receiverVpa: req.user.vpa }
+                ]
+            },
+            order: [['createdAt', 'DESC']],
+            limit: 30
+        });
         res.json(transactions);
     } catch (e) {
         res.status(500).json({ error: e.message });

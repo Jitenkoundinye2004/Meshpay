@@ -76,3 +76,25 @@
     @apply bg-background text-foreground font-sans antialiased selection:bg-primary selection:text-primary-foreground;
   }
 }
+
+/* Global Hand Pointer Cursor Rule for All Interactive Buttons & Elements */
+button,
+a,
+[role="button"],
+input[type="submit"],
+input[type="button"],
+input[type="checkbox"],
+input[type="radio"],
+select,
+.cursor-pointer,
+[onClick],
+div[onClick] {
+  cursor: pointer !important;
+}
+
+button:hover,
+a:hover,
+[role="button"]:hover,
+.cursor-pointer:hover {
+  cursor: pointer !important;
+}

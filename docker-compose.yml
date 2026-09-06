@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  meshpay-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - JWT_SECRET=super_secret_meshpay_jwt_token_key_2026
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_PROVIDER=${AI_PROVIDER:-mock}
+      - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
+      - NODE_ENV=production
+    volumes:
+      - meshpay-db-data:/app/backend/database.sqlite
+    restart: unless-stopped
+
+volumes:
+  meshpay-db-data:

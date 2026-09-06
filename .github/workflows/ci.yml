@@ -31,5 +31,15 @@ jobs:
       working-directory: ./backend
       run: npm ci
 
-    # Render automatically handles the Continuous Deployment (CD) when you push to the main branch.
-    # This Action ensures your code is fully functional and builds correctly before Render attempts to deploy it.
+    - name: Run Backend Unit & AI Integration Tests
+      working-directory: ./backend
+      env:
+        AI_PROVIDER: mock
+        JWT_SECRET: ci_test_jwt_secret
+      run: npm test
+
+    - name: Run Performance Benchmark Check
+      working-directory: ./backend
+      env:
+        AI_PROVIDER: mock
+      run: npm run benchmark

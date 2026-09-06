@@ -1,28 +1,34 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const otpSchema = new mongoose.Schema({
+const OTP = sequelize.define('OTP', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
     email: {
-        type: String,
-        required: true,
-        lowercase: true,
-        trim: true
+        type: DataTypes.STRING,
+        allowNull: false,
+        set(val) {
+            this.setDataValue('email', val ? val.toLowerCase().trim() : val);
+        }
     },
     otp: {
-        type: String,
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     type: {
-        type: String,
-        enum: ['REGISTER', 'RESET_PASSWORD', 'RESET_PIN'],
-        required: true
+        type: DataTypes.ENUM('REGISTER', 'RESET_PASSWORD', 'RESET_PIN'),
+        allowNull: false
     },
     expiresAt: {
-        type: Date,
-        required: true,
-        index: { expires: '5m' } // Automatically delete document after 5 minutes
+        type: DataTypes.DATE,
+        allowNull: false
     }
 }, {
+    tableName: 'otps',
     timestamps: true
 });
 
-module.exports = mongoose.model('OTP', otpSchema);
+module.exports = OTP;

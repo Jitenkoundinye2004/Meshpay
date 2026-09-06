@@ -31,15 +31,27 @@ class VirtualDevice {
 class MeshSimulatorService {
     constructor() {
         this.devices = new Map();
-        this.seedDefaultDevices();
+        // Ensure default Internet Bridge is always registered
+        this.devices.set('phone-bridge', new VirtualDevice('phone-bridge', true));
     }
 
-    seedDefaultDevices() {
-        this.devices.set('phone-jiten', new VirtualDevice('phone-jiten', false));
-        this.devices.set('phone-stranger1', new VirtualDevice('phone-stranger1', false));
-        this.devices.set('phone-stranger2', new VirtualDevice('phone-stranger2', false));
-        this.devices.set('phone-stranger3', new VirtualDevice('phone-stranger3', false));
-        this.devices.set('phone-bridge', new VirtualDevice('phone-bridge', true));
+    registerDevice(deviceId, hasInternet = false) {
+        if (!this.devices.has(deviceId)) {
+            this.devices.set(deviceId, new VirtualDevice(deviceId, hasInternet));
+        }
+        return this.devices.get(deviceId);
+    }
+
+    syncWithUsers(users = []) {
+        // Ensure Internet Bridge is present
+        this.registerDevice('phone-bridge', true);
+
+        // Dynamically add nodes for registered users
+        for (const user of users) {
+            const handle = user.vpa ? user.vpa.split('@')[0] : user.holderName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const deviceId = `node-${handle}`;
+            this.registerDevice(deviceId, false);
+        }
     }
 
     getDevices() {
@@ -51,9 +63,9 @@ class MeshSimulatorService {
     }
 
     inject(senderDeviceId, packet) {
-        const sender = this.devices.get(senderDeviceId);
+        let sender = this.devices.get(senderDeviceId);
         if (!sender) {
-            throw new Error(`Unknown device: ${senderDeviceId}`);
+            sender = this.registerDevice(senderDeviceId, false);
         }
         sender.hold(packet);
         console.log(`Packet ${packet.packetId.substring(0, 8)} injected at ${senderDeviceId} (TTL=${packet.ttl})`);

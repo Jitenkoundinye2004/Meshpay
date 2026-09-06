@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldCheck, ArrowRight, Zap, Lock, User, Eye, EyeOff, Mail, KeyRound, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Zap, Lock, User, Eye, EyeOff, Mail, KeyRound, ArrowLeft, AtSign } from 'lucide-react';
 import { generateKeyPair, exportPublicKey, exportPrivateKey } from '../lib/crypto';
 
 interface AuthScreenProps {
@@ -11,13 +11,16 @@ type AuthView = 'LOGIN' | 'REGISTER' | 'REGISTER_OTP' | 'FORGOT_PASSWORD' | 'FOR
 
 export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
   const [view, setView] = useState<AuthView>('LOGIN');
+  const [useOtpVerification, setUseOtpVerification] = useState(false);
   const [formData, setFormData] = useState({ 
     email: '', 
     holderName: '', 
     password: '', 
     pin: '',
+    vpa: '',
     otp: '' 
   });
+  const [isVpaCustomized, setIsVpaCustomized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -25,7 +28,8 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
 
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  // Use relative path for seamless Vite proxy and Express serving
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
   const clearMessages = () => {
     setError('');
@@ -34,6 +38,15 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
 
   const validateEmail = (email: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  };
+
+  const handleNameChange = (nameVal: string) => {
+    const updated = { ...formData, holderName: nameVal };
+    if (!isVpaCustomized) {
+      const cleanName = nameVal.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+      updated.vpa = `${cleanName}@upi`;
+    }
+    setFormData(updated);
   };
 
   const handleSendRegisterOtp = async (e: React.FormEvent) => {
@@ -62,35 +75,68 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       return;
     }
 
-    const baseName = formData.holderName.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const randomNum = Math.floor(100 + Math.random() * 900);
-    const generatedVpa = `${baseName}${randomNum}@upi`;
+    const finalVpa = formData.vpa || `${formData.holderName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'}@upi`;
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/auth/send-register-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email, vpa: generatedVpa })
+        body: JSON.stringify({ email: formData.email, vpa: finalVpa })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
+      if (!res.ok) throw new Error(data.error || 'Failed to send verification code');
       
-      setSuccessMsg('OTP sent to your email! Expires in 5 minutes.');
+      if (data.devOtp) {
+        setFormData(prev => ({ ...prev, otp: String(data.devOtp), vpa: finalVpa }));
+        setSuccessMsg(`Verification code: ${data.devOtp} (Pre-filled for fast testing)`);
+      } else {
+        setFormData(prev => ({ ...prev, vpa: finalVpa }));
+        setSuccessMsg('Verification code sent to your email address!');
+      }
+      
       setView('REGISTER_OTP');
     } catch (err: any) {
-      setError(err.message);
+      console.error('Registration OTP error:', err);
+      setError(err.message || 'Failed to send verification code');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleRegisterVerify = async (e: React.FormEvent) => {
+  const handleRegisterUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // If OTP verification mode is enabled and we are on initial REGISTER step, send OTP first
+    if (useOtpVerification && view === 'REGISTER') {
+      return handleSendRegisterOtp(e);
+    }
+
     clearMessages();
     setIsLoading(true);
 
-    if (!formData.otp) {
-      setError('Please enter the OTP');
+    if (!formData.holderName) {
+      setError('Please provide your full name');
+      setIsLoading(false);
+      return;
+    }
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      setIsLoading(false);
+      return;
+    }
+    if (!/^\d{4}$/.test(formData.pin)) {
+      setError('Offline transaction PIN must be exactly 4 digits');
+      setIsLoading(false);
+      return;
+    }
+    if (!validateEmail(formData.email)) {
+      setError('Please provide a valid email address');
+      setIsLoading(false);
+      return;
+    }
+
+    if (view === 'REGISTER_OTP' && !formData.otp) {
+      setError('Please enter the 6-digit verification code');
       setIsLoading(false);
       return;
     }
@@ -100,19 +146,27 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       const publicKeyBase64 = await exportPublicKey(keyPair.publicKey);
       const privateKeyBase64 = await exportPrivateKey(keyPair.privateKey);
 
-      const baseName = formData.holderName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const randomNum = Math.floor(100 + Math.random() * 900);
-      const generatedVpa = `${baseName}${randomNum}@upi`;
+      let finalVpa = formData.vpa.trim();
+      if (!finalVpa) {
+        const cleanName = formData.holderName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+        finalVpa = `${cleanName}@upi`;
+      }
+      if (!finalVpa.includes('@')) {
+        finalVpa = `${finalVpa}@upi`;
+      }
 
-      const payload = {
-        vpa: generatedVpa,
+      const payload: any = {
+        vpa: finalVpa,
         email: formData.email,
         holderName: formData.holderName,
         password: formData.password,
         pin: formData.pin,
-        publicKey: publicKeyBase64,
-        otp: formData.otp
+        publicKey: publicKeyBase64
       };
+
+      if (formData.otp) {
+        payload.otp = formData.otp;
+      }
 
       const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -127,7 +181,8 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       }
       onLoginSuccess(data.token, data);
     } catch (err: any) {
-      setError(err.message);
+      console.error('Registration error:', err);
+      setError(err.message || 'Registration failed');
     } finally {
       setIsLoading(false);
     }
@@ -160,6 +215,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
 
       onLoginSuccess(data.token, data);
     } catch (err: any) {
+      console.error('Login error:', err);
       setError(err.message);
     } finally {
       setIsLoading(false);
@@ -186,7 +242,13 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send OTP');
 
-      setSuccessMsg('If your email exists, an OTP has been sent. Expires in 5 minutes.');
+      if (data.devOtp) {
+        setFormData(prev => ({ ...prev, otp: String(data.devOtp) }));
+        setSuccessMsg(`Reset code generated: ${data.devOtp} (Pre-filled for fast testing)`);
+      } else {
+        setSuccessMsg('If your email exists, an OTP has been sent.');
+      }
+      
       setView('FORGOT_PASSWORD_OTP');
     } catch (err: any) {
       setError(err.message);
@@ -250,10 +312,12 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
         <div className="w-full">
           <input 
             type={type} 
+            name={name}
             placeholder={placeholder}
-            className="w-full bg-secondary/50 border border-border rounded-xl py-3 pl-10 pr-10 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all"
+            className="w-full bg-secondary/50 border border-border rounded-xl py-3 pl-10 pr-10 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all text-foreground text-sm"
             value={value}
             onChange={onChange}
+            autoComplete="off"
           />
         </div>
         {extraAction && (
@@ -317,20 +381,22 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
           )}
 
           {successMsg && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-primary/10 text-primary text-sm p-3 rounded-lg border border-primary/20 mb-6 text-center font-medium">
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-primary/10 text-primary text-sm p-3 rounded-lg border border-primary/20 mb-6 text-center font-medium break-words">
               {successMsg}
             </motion.div>
           )}
 
-          <form onSubmit={
-            view === 'LOGIN' ? handleLogin :
-            view === 'REGISTER' ? handleSendRegisterOtp :
-            view === 'REGISTER_OTP' ? handleRegisterVerify :
-            view === 'FORGOT_PASSWORD' ? handleForgotPassword :
-            handleResetPassword
-          } className="space-y-4">
+          <form 
+            onSubmit={
+              view === 'LOGIN' ? handleLogin :
+              (view === 'REGISTER' || view === 'REGISTER_OTP') ? handleRegisterUser :
+              view === 'FORGOT_PASSWORD' ? handleForgotPassword :
+              handleResetPassword
+            } 
+            className="space-y-4"
+            translate="no"
+          >
 
-            {/* Back Button for Sub-flows */}
             {(view === 'REGISTER_OTP' || view === 'FORGOT_PASSWORD' || view === 'FORGOT_PASSWORD_OTP') && (
               <button 
                 type="button"
@@ -348,14 +414,26 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                 
                 <div className={view === 'REGISTER' ? 'block' : 'hidden'}>
                   {renderInput(
-                    'name', 'Full Name', 'text', 'Jiten Koundinye', <User size={18} className="text-muted-foreground" />,
-                    formData.holderName, (e) => setFormData({...formData, holderName: e.target.value})
+                    'name', 'Full Name', 'text', 'e.g. Alex Morgan', <User size={18} className="text-muted-foreground" />,
+                    formData.holderName, (e) => handleNameChange(e.target.value)
+                  )}
+                </div>
+
+                <div className={view === 'REGISTER' ? 'block' : 'hidden'}>
+                  {renderInput(
+                    'vpa', 'UPI VPA Handle', 'text', 'e.g. alex@upi', <AtSign size={18} className="text-muted-foreground" />,
+                    formData.vpa, (e) => {
+                      setIsVpaCustomized(true);
+                      setFormData({ ...formData, vpa: e.target.value.toLowerCase().replace(/\s/g, '') });
+                    },
+                    undefined,
+                    "Dynamic UPI handle for sending & receiving payments."
                   )}
                 </div>
 
                 <div className={(view === 'LOGIN' || view === 'REGISTER' || view === 'FORGOT_PASSWORD') ? 'block' : 'hidden'}>
                   {renderInput(
-                    'email', 'Email Address', 'email', 'you@email.com', <Mail size={18} className="text-muted-foreground" />,
+                    'email', 'Email Address', 'email', 'e.g. alex@example.com', <Mail size={18} className="text-muted-foreground" />,
                     formData.email, (e) => setFormData({...formData, email: e.target.value.toLowerCase()})
                   )}
                 </div>
@@ -375,8 +453,19 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                       <button type="button" onClick={() => setShowPin(!showPin)} className="text-muted-foreground hover:text-foreground p-1">
                         {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>,
-                      "This PIN is used to sign offline transactions."
+                      "This 4-digit PIN signs offline transactions."
                     )}
+
+                    <div className="pt-2 border-t border-border/40 flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground font-medium">Verify via Email OTP</span>
+                      <button
+                        type="button"
+                        onClick={() => setUseOtpVerification(!useOtpVerification)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useOtpVerification ? 'bg-primary' : 'bg-secondary'}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useOtpVerification ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -400,23 +489,20 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                 <div className={(view === 'REGISTER_OTP' || view === 'FORGOT_PASSWORD_OTP') ? 'block' : 'hidden'}>
                   <div className="space-y-4">
                     <p className="text-sm text-center text-muted-foreground mb-4">
-                      Enter the 6-digit code sent to <span className="font-bold text-foreground">{formData.email || 'your email'}</span>
+                      Enter 6-digit code sent to <span className="font-bold text-foreground">{formData.email || 'your email'}</span>
                     </p>
                     {renderInput(
                       'otp', 'Verification Code (OTP)', 'text', '123456', <KeyRound size={18} className="text-muted-foreground" />,
                       formData.otp, (e) => setFormData({...formData, otp: e.target.value.replace(/\D/g, '').substring(0, 6)})
                     )}
+                    {view === 'FORGOT_PASSWORD_OTP' && renderInput(
+                      'reset-password', 'New Password', showPassword ? 'text' : 'password', '••••••••', <Lock size={18} className="text-muted-foreground" />,
+                      formData.password, (e) => setFormData({...formData, password: e.target.value}),
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1">
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    )}
                   </div>
-                </div>
-
-                <div className={view === 'FORGOT_PASSWORD_OTP' ? 'block' : 'hidden'}>
-                  {renderInput(
-                    'reset-password', 'New Password', showPassword ? 'text' : 'password', '••••••••', <Lock size={18} className="text-muted-foreground" />,
-                    formData.password, (e) => setFormData({...formData, password: e.target.value}),
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1">
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  )}
                 </div>
 
             </div>
@@ -424,20 +510,21 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
             <button 
               type="submit" 
               disabled={isLoading}
+              translate="no"
               className="w-full bg-primary text-primary-foreground font-bold rounded-xl py-3.5 mt-4 flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] disabled:opacity-50"
             >
               {isLoading ? (
                 <span className="animate-pulse">Processing...</span>
               ) : (
-                <>
-                  {view === 'LOGIN' && 'Access Wallet'}
-                  {view === 'REGISTER' && 'Send Verification Code'}
-                  {view === 'REGISTER_OTP' && 'Verify & Create Secure Wallet'}
-                  {view === 'FORGOT_PASSWORD' && 'Send Reset Link'}
-                  {view === 'FORGOT_PASSWORD_OTP' && 'Reset Password'}
-                  <ArrowRight size={18} />
-                </>
+                <span translate="no">
+                  {view === 'LOGIN' && 'Sign In to Wallet'}
+                  {view === 'REGISTER' && (useOtpVerification ? 'Send Verification Code' : 'Create Account & Wallet')}
+                  {view === 'REGISTER_OTP' && 'Verify Code & Create Wallet'}
+                  {view === 'FORGOT_PASSWORD' && 'Send Reset Code'}
+                  {view === 'FORGOT_PASSWORD_OTP' && 'Confirm New Password'}
+                </span>
               )}
+              <ArrowRight size={18} />
             </button>
           </form>
         </div>

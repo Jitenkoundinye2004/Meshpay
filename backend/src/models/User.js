@@ -1,43 +1,47 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const userSchema = new mongoose.Schema({
+const User = sequelize.define('User', {
     vpa: {
-        type: String,
-        required: true,
-        unique: true,
-        trim: true,
-        lowercase: true
+        type: DataTypes.STRING,
+        primaryKey: true,
+        allowNull: false,
+        set(val) {
+            this.setDataValue('vpa', val ? val.toLowerCase().trim() : val);
+        }
     },
     email: {
-        type: String,
-        required: true,
-        unique: true
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true,
+        set(val) {
+            this.setDataValue('email', val ? val.toLowerCase().trim() : val);
+        }
     },
     holderName: {
-        type: String,
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     passwordHash: {
-        type: String,
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     pinHash: {
-        type: String,
-        required: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     balance: {
-        type: Number,
-        required: true,
-        default: 0.00,
-        min: 0 // Prevents negative balance at the DB level
+        type: DataTypes.FLOAT,
+        allowNull: false,
+        defaultValue: 0.00
     },
     publicKey: {
-        type: String, // We will use this in Phase 2 for Cryptographic Verification
-        default: null
+        type: DataTypes.TEXT,
+        allowNull: true
     }
 }, {
-    timestamps: true,
-    optimisticConcurrency: true // Mongoose's built-in versioning (__v) to prevent race conditions
+    tableName: 'users',
+    timestamps: true
 });
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = User;

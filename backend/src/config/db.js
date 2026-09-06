@@ -1,13 +1,27 @@
-const mongoose = require('mongoose');
-require('dotenv').config();
+const sequelize = require('./database');
+const User = require('../models/User');
+const Account = require('../models/Account');
+const Transaction = require('../models/Transaction');
+const OTP = require('../models/OTP');
+const {
+    AITransactionAnalysis,
+    AIRouteRecommendation,
+    AINetworkInsight,
+    AIIncident,
+    AIConversation
+} = require('../models/AIModels');
 
 const connectDB = async () => {
     try {
-        const conn = await mongoose.connect(process.env.MONGO_URI);
-        console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+        await sequelize.authenticate();
+        console.log('✅ SQLite Database Connection Established (Sequelize)');
+        
+        // Sync models (creates tables if they don't exist)
+        await sequelize.sync();
+        console.log('✅ All Database Schemas & AI Tables Synchronized');
     } catch (error) {
-        console.error(`❌ MongoDB Connection Error: ${error.message}`);
-        process.exit(1);
+        console.error(`❌ SQLite Database Connection Error: ${error.message}`);
+        throw error;
     }
 };
 

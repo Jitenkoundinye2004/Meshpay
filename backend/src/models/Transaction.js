@@ -1,45 +1,69 @@
-const mongoose = require('mongoose');
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
 
-const transactionSchema = new mongoose.Schema({
+const Transaction = sequelize.define('Transaction', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
     packetId: {
-        type: String,
-        required: true,
-        unique: true // Prevents replay attacks automatically
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    },
+    packetHash: {
+        type: DataTypes.STRING,
+        allowNull: true
     },
     senderVpa: {
-        type: String,
-        required: true,
-        index: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     receiverVpa: {
-        type: String,
-        required: true,
-        index: true
+        type: DataTypes.STRING,
+        allowNull: false
     },
     amount: {
-        type: Number,
-        required: true,
-        min: 1
+        type: DataTypes.FLOAT,
+        allowNull: false
     },
     status: {
-        type: String,
-        enum: ['SETTLED', 'REJECTED', 'INVALID'],
-        required: true
+        type: DataTypes.ENUM('SETTLED', 'REJECTED', 'INVALID', 'PENDING'),
+        allowNull: false,
+        defaultValue: 'SETTLED'
+    },
+    signedAt: {
+        type: DataTypes.DATE,
+        allowNull: true
+    },
+    settledAt: {
+        type: DataTypes.DATE,
+        allowNull: true
     },
     bridgeNodeId: {
-        type: String,
-        default: null
+        type: DataTypes.STRING,
+        defaultValue: 'Direct-Upload'
     },
     hopCount: {
-        type: Number,
-        default: 0
+        type: DataTypes.INTEGER,
+        defaultValue: 0
     },
     failureReason: {
-        type: String,
-        default: null
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    riskLevel: {
+        type: DataTypes.ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'),
+        defaultValue: 'LOW'
+    },
+    riskScore: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0
     }
 }, {
+    tableName: 'transactions',
     timestamps: true
 });
 
-module.exports = mongoose.model('Transaction', transactionSchema);
+module.exports = Transaction;
