@@ -11,7 +11,6 @@ type AuthView = 'LOGIN' | 'REGISTER' | 'REGISTER_OTP' | 'FORGOT_PASSWORD' | 'FOR
 
 export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
   const [view, setView] = useState<AuthView>('LOGIN');
-  const [useOtpVerification, setUseOtpVerification] = useState(false);
   const [formData, setFormData] = useState({ 
     email: '', 
     holderName: '', 
@@ -88,7 +87,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       
       if (data.devOtp) {
         setFormData(prev => ({ ...prev, otp: String(data.devOtp), vpa: finalVpa }));
-        setSuccessMsg(`Verification code: ${data.devOtp} (Pre-filled for fast testing)`);
+        setSuccessMsg(`Verification code: ${data.devOtp} (Sent to email & pre-filled for local testing)`);
       } else {
         setFormData(prev => ({ ...prev, vpa: finalVpa }));
         setSuccessMsg('Verification code sent to your email address!');
@@ -103,39 +102,12 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
     }
   };
 
-  const handleRegisterUser = async (e: React.FormEvent) => {
+  const handleRegisterVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // If OTP verification mode is enabled and we are on initial REGISTER step, send OTP first
-    if (useOtpVerification && view === 'REGISTER') {
-      return handleSendRegisterOtp(e);
-    }
-
     clearMessages();
     setIsLoading(true);
 
-    if (!formData.holderName) {
-      setError('Please provide your full name');
-      setIsLoading(false);
-      return;
-    }
-    if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long');
-      setIsLoading(false);
-      return;
-    }
-    if (!/^\d{4}$/.test(formData.pin)) {
-      setError('Offline transaction PIN must be exactly 4 digits');
-      setIsLoading(false);
-      return;
-    }
-    if (!validateEmail(formData.email)) {
-      setError('Please provide a valid email address');
-      setIsLoading(false);
-      return;
-    }
-
-    if (view === 'REGISTER_OTP' && !formData.otp) {
+    if (!formData.otp) {
       setError('Please enter the 6-digit verification code');
       setIsLoading(false);
       return;
@@ -155,18 +127,15 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
         finalVpa = `${finalVpa}@upi`;
       }
 
-      const payload: any = {
+      const payload = {
         vpa: finalVpa,
         email: formData.email,
         holderName: formData.holderName,
         password: formData.password,
         pin: formData.pin,
-        publicKey: publicKeyBase64
+        publicKey: publicKeyBase64,
+        otp: formData.otp
       };
-
-      if (formData.otp) {
-        payload.otp = formData.otp;
-      }
 
       const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
@@ -181,7 +150,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
       }
       onLoginSuccess(data.token, data);
     } catch (err: any) {
-      console.error('Registration error:', err);
+      console.error('Registration verify error:', err);
       setError(err.message || 'Registration failed');
     } finally {
       setIsLoading(false);
@@ -244,7 +213,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
 
       if (data.devOtp) {
         setFormData(prev => ({ ...prev, otp: String(data.devOtp) }));
-        setSuccessMsg(`Reset code generated: ${data.devOtp} (Pre-filled for fast testing)`);
+        setSuccessMsg(`Reset code generated: ${data.devOtp} (Sent to email & pre-filled for local testing)`);
       } else {
         setSuccessMsg('If your email exists, an OTP has been sent.');
       }
@@ -331,7 +300,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
   );
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden dark text-foreground">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 relative overflow-hidden dark text-foreground notranslate" translate="no">
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-primary/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-emerald-900/30 rounded-full blur-[120px] pointer-events-none" />
 
@@ -339,7 +308,8 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
-        className="w-full max-w-md z-10"
+        className="w-full max-w-md z-10 notranslate"
+        translate="no"
       >
         <div className="text-center mb-8">
           <motion.div 
@@ -349,24 +319,24 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
           >
             <Zap size={32} />
           </motion.div>
-          <h1 className="text-3xl md:text-4xl font-black tracking-tight mb-2">MeshPay</h1>
+          <h1 className="text-3xl md:text-4xl font-black tracking-tight mb-2 notranslate" translate="no">MeshPay</h1>
           <p className="text-muted-foreground font-medium">The True P2P Offline Ledger</p>
         </div>
 
-        <div className="bg-card/50 backdrop-blur-xl border border-border/50 p-6 md:p-8 rounded-3xl shadow-2xl">
+        <div className="bg-card/50 backdrop-blur-xl border border-border/50 p-6 md:p-8 rounded-3xl shadow-2xl notranslate" translate="no">
           
           {(view === 'LOGIN' || view === 'REGISTER') && (
-            <div className="flex bg-secondary/50 p-1 rounded-xl mb-6">
+            <div className="flex bg-secondary/50 p-1 rounded-xl mb-6 notranslate" translate="no">
               <button 
                 type="button"
-                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${view === 'LOGIN' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all cursor-pointer ${view === 'LOGIN' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                 onClick={() => { setView('LOGIN'); clearMessages(); }}
               >
                 Login
               </button>
               <button 
                 type="button"
-                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${view === 'REGISTER' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all cursor-pointer ${view === 'REGISTER' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
                 onClick={() => { setView('REGISTER'); clearMessages(); }}
               >
                 Register
@@ -389,11 +359,12 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
           <form 
             onSubmit={
               view === 'LOGIN' ? handleLogin :
-              (view === 'REGISTER' || view === 'REGISTER_OTP') ? handleRegisterUser :
+              view === 'REGISTER' ? handleSendRegisterOtp :
+              view === 'REGISTER_OTP' ? handleRegisterVerify :
               view === 'FORGOT_PASSWORD' ? handleForgotPassword :
               handleResetPassword
             } 
-            className="space-y-4"
+            className="space-y-4 notranslate"
             translate="no"
           >
 
@@ -404,7 +375,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                   setView(view === 'REGISTER_OTP' ? 'REGISTER' : 'LOGIN');
                   clearMessages();
                 }}
-                className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-4 transition-colors"
+                className="flex items-center text-sm font-medium text-muted-foreground hover:text-foreground mb-4 transition-colors cursor-pointer"
               >
                 <ArrowLeft size={16} className="mr-1" /> Back
               </button>
@@ -443,29 +414,18 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                     {renderInput(
                       'register-password', 'Password', showPassword ? 'text' : 'password', '••••••••', <Lock size={18} className="text-muted-foreground" />,
                       formData.password, (e) => setFormData({...formData, password: e.target.value}),
-                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1">
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1 cursor-pointer">
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
                     )}
                     {renderInput(
                       'pin', 'Offline Transaction PIN', showPin ? 'text' : 'password', '4-Digit PIN', <ShieldCheck size={18} className="text-muted-foreground" />,
                       formData.pin, (e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')}),
-                      <button type="button" onClick={() => setShowPin(!showPin)} className="text-muted-foreground hover:text-foreground p-1">
+                      <button type="button" onClick={() => setShowPin(!showPin)} className="text-muted-foreground hover:text-foreground p-1 cursor-pointer">
                         {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>,
                       "This 4-digit PIN signs offline transactions."
                     )}
-
-                    <div className="pt-2 border-t border-border/40 flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground font-medium">Verify via Email OTP</span>
-                      <button
-                        type="button"
-                        onClick={() => setUseOtpVerification(!useOtpVerification)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${useOtpVerification ? 'bg-primary' : 'bg-secondary'}`}
-                      >
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${useOtpVerification ? 'translate-x-6' : 'translate-x-1'}`} />
-                      </button>
-                    </div>
                   </div>
                 </div>
 
@@ -474,12 +434,12 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                     {renderInput(
                       'login-password', 'Password', showPassword ? 'text' : 'password', '••••••••', <Lock size={18} className="text-muted-foreground" />,
                       formData.password, (e) => setFormData({...formData, password: e.target.value}),
-                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1">
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1 cursor-pointer">
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
                     )}
                     <div className="flex justify-end">
-                      <button type="button" onClick={() => { setView('FORGOT_PASSWORD'); clearMessages(); }} className="text-xs text-primary font-medium hover:underline">
+                      <button type="button" onClick={() => { setView('FORGOT_PASSWORD'); clearMessages(); }} className="text-xs text-primary font-medium hover:underline cursor-pointer">
                         Forgot Password?
                       </button>
                     </div>
@@ -498,7 +458,7 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
                     {view === 'FORGOT_PASSWORD_OTP' && renderInput(
                       'reset-password', 'New Password', showPassword ? 'text' : 'password', '••••••••', <Lock size={18} className="text-muted-foreground" />,
                       formData.password, (e) => setFormData({...formData, password: e.target.value}),
-                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1">
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-muted-foreground hover:text-foreground p-1 cursor-pointer">
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
                     )}
@@ -511,14 +471,14 @@ export function AuthScreen({ onLoginSuccess }: AuthScreenProps) {
               type="submit" 
               disabled={isLoading}
               translate="no"
-              className="w-full bg-primary text-primary-foreground font-bold rounded-xl py-3.5 mt-4 flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] disabled:opacity-50"
+              className="w-full bg-primary text-primary-foreground font-bold rounded-xl py-3.5 mt-4 flex items-center justify-center gap-2 hover:bg-primary/90 transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] disabled:opacity-50 cursor-pointer notranslate"
             >
               {isLoading ? (
-                <span className="animate-pulse">Processing...</span>
+                <span className="animate-pulse notranslate" translate="no">Processing...</span>
               ) : (
-                <span translate="no">
+                <span className="notranslate" translate="no">
                   {view === 'LOGIN' && 'Sign In to Wallet'}
-                  {view === 'REGISTER' && (useOtpVerification ? 'Send Verification Code' : 'Create Account & Wallet')}
+                  {view === 'REGISTER' && 'Send Verification Code'}
                   {view === 'REGISTER_OTP' && 'Verify Code & Create Wallet'}
                   {view === 'FORGOT_PASSWORD' && 'Send Reset Code'}
                   {view === 'FORGOT_PASSWORD_OTP' && 'Confirm New Password'}
